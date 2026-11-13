@@ -7,6 +7,8 @@ import com.auth0.jwt.exceptions.JWTVerificationException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -18,10 +20,11 @@ public class TokenService {
     private final String issuer;
     private final Duration validade;
 
-    public TokenService(@Value("${api.security.token.secret}") String secret,
+    public TokenService(@Value("${api.security.token.public-key}") RSAPublicKey publicKey,
+                        @Value("${api.security.token.private-key}") RSAPrivateKey privateKey,
                         @Value("${api.security.token.issuer}") String issuer,
                         @Value("${api.security.token.expiration-hours}") long expirationHours) {
-        this.algorithm = Algorithm.HMAC256(secret);
+        this.algorithm = Algorithm.RSA256(publicKey, privateKey);
         this.issuer = issuer;
         this.validade = Duration.ofHours(expirationHours);
     }
