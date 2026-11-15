@@ -14,7 +14,9 @@ public record UsuarioResponseDTO(
         @Schema(example = "-51.3897085", nullable = true) Double longitude,
         @Schema(description = "false quando os serviços de CEP não devolveram coordenadas", example = "true")
         boolean localizacaoEncontrada,
-        @Schema(example = "CIDADAO") String papel
+        @Schema(example = "CIDADAO") String papel,
+        @Schema(description = "UBS de atuação (só para AGENTE)", example = "CNES-2755114", nullable = true)
+        String ubsId
 ) {
     public static UsuarioResponseDTO from(User user) {
         return new UsuarioResponseDTO(
@@ -26,7 +28,8 @@ public record UsuarioResponseDTO(
                 user.getLatitude(),
                 user.getLongitude(),
                 user.getLatitude() != null && user.getLongitude() != null,
-                user.getPapel().name()
+                user.getPapel().name(),
+                user.getUbsId()
         );
     }
 }

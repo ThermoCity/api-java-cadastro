@@ -13,7 +13,7 @@ import java.util.Collection;
 import java.util.List;
 
 @Entity
-@Table(name = "USUARIO")
+@Table(name = "tmc_usuario")
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User implements UserDetails {
@@ -54,8 +54,18 @@ public class User implements UserDetails {
     @Column(name = "DATA_CRIACAO", nullable = false)
     private OffsetDateTime dataCriacao;
 
+    /** UBS de atuação; obrigatória para AGENTE (id de tmc_servico). */
+    @Column(name = "UBS_ID", length = 40)
+    private String ubsId;
+
     public User(String nome, String email, String senhaHash, String telefone, String cpf, String cep,
                 Double latitude, Double longitude, UserRole papel) {
+        this(nome, email, senhaHash, telefone, cpf, cep, latitude, longitude, papel, null);
+    }
+
+    public User(String nome, String email, String senhaHash, String telefone, String cpf, String cep,
+                Double latitude, Double longitude, UserRole papel, String ubsId) {
+        this.ubsId = ubsId;
         this.nome = nome;
         this.email = email;
         this.senha = senhaHash;
