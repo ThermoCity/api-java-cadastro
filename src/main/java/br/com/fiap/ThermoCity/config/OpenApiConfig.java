@@ -18,7 +18,7 @@ public class OpenApiConfig {
     public OpenAPI thermoCityOpenApi() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("ThermoCity — API Java (camada QUEM)")
+                        .title("ThermoCity — API Java")
                         .version("v1")
                         .description("""
                                 Gêmeo digital de risco de calor para Presidente Prudente-SP.
