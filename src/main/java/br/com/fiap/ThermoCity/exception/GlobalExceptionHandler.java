@@ -13,6 +13,7 @@ import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.List;
 
@@ -32,6 +33,31 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErroResponse> corpoInvalido(HttpMessageNotReadableException e) {
         return resposta(HttpStatus.BAD_REQUEST, "Corpo da requisição inválido ou mal formatado", List.of());
+    }
+
+    @ExceptionHandler(RegraNegocioException.class)
+    public ResponseEntity<ErroResponse> regraNegocio(RegraNegocioException e) {
+        return resposta(HttpStatus.BAD_REQUEST, e.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErroResponse> tipoInvalido(MethodArgumentTypeMismatchException e) {
+        return resposta(HttpStatus.BAD_REQUEST, "Parâmetro inválido: " + e.getName(), List.of());
+    }
+
+    @ExceptionHandler(RecursoNaoEncontradoException.class)
+    public ResponseEntity<ErroResponse> naoEncontrado(RecursoNaoEncontradoException e) {
+        return resposta(HttpStatus.NOT_FOUND, e.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(AcessoNegadoException.class)
+    public ResponseEntity<ErroResponse> acessoNegadoAoRecurso(AcessoNegadoException e) {
+        return resposta(HttpStatus.FORBIDDEN, e.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(ValorNaoProcessavelException.class)
+    public ResponseEntity<ErroResponse> naoProcessavel(ValorNaoProcessavelException e) {
+        return resposta(HttpStatus.UNPROCESSABLE_CONTENT, e.getMessage(), e.getDetalhes());
     }
 
     @ExceptionHandler(CepNaoEncontradoException.class)
