@@ -74,4 +74,24 @@ public class ListaBuscaAtiva {
             encerradaEm = OffsetDateTime.now();
         }
     }
+
+    /** O nível voltou a NC3+ no mesmo dia: a lista volta a valer com o andamento dos contatos. */
+    public void reabrir() {
+        status = StatusLista.ABERTA;
+        encerradaEm = null;
+    }
+
+    /**
+     * Guarda o maior nível do dia, que define o alcance. Se o nível cair (ex.: NC5 para NC4), quem já
+     * está na lista continua nela, para não perder contatos em andamento.
+     */
+    public void elevarNivel(int nivel) {
+        if (nivel > nivelCalor) {
+            nivelCalor = nivel;
+        }
+    }
+
+    public boolean isAberta() {
+        return status == StatusLista.ABERTA;
+    }
 }

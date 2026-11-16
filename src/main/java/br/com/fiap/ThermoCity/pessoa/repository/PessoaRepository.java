@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface PessoaRepository extends JpaRepository<Pessoa, Long> {
@@ -29,4 +30,11 @@ public interface PessoaRepository extends JpaRepository<Pessoa, Long> {
 
     @EntityGraph(attributePaths = {"setor", "ubs", "titular"})
     Optional<Pessoa> findComRelacionamentosById(Long id);
+
+    /**
+     * Todas as pessoas acompanhadas, com setor e UBS, para gerar a lista do dia. Usa left join para que
+     * as pessoas sem setor ou UBS também venham e sejam registradas para correção do cadastro.
+     */
+    @Query("select p from Pessoa p left join fetch p.setor left join fetch p.ubs")
+    List<Pessoa> findParaBuscaAtiva();
 }
