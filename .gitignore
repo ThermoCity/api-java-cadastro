@@ -35,3 +35,6 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Chaves JWT (a privada nunca vai para o Git) ###
+src/main/resources/keys/
