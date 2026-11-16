@@ -39,15 +39,33 @@ public class GeoService {
     private final SetorRepository setorRepository;
     private final ServicoRepository servicoRepository;
     private final Set<String> ubsExcluidas;
+    private final Set<String> revisoesRefugio;
     private final GeometryFactory geometryFactory = new GeometryFactory();
 
     private volatile Indice indice;
 
     public GeoService(SetorRepository setorRepository, ServicoRepository servicoRepository,
-                      @Value("${thermocity.ubs.excluidas:}") Set<String> ubsExcluidas) {
+                      @Value("${thermocity.ubs.excluidas:}") Set<String> ubsExcluidas,
+                      @Value("${thermocity.refugios.revisoes:manter,potencial}") Set<String> revisoesRefugio) {
         this.setorRepository = setorRepository;
         this.servicoRepository = servicoRepository;
         this.ubsExcluidas = ubsExcluidas;
+        this.revisoesRefugio = revisoesRefugio;
+    }
+
+    /** UBS que podem ser referência (sem penitenciária, triagem COVID etc.), em ordem de nome. */
+    public List<Servico> ubsValidas() {
+        return indice().ubs();
+    }
+
+    /**
+     * Refúgio climático mais próximo da coordenada. Só valem os refúgios cuja revisão está em
+     * thermocity.refugios.revisoes (manter e potencial: 101 locais no banco atual).
+     */
+    public Optional<RefugioProximo> refugioMaisProximo(double latitude, double longitude) {
+        return indice().refugios().stream()
+                .map(r -> new RefugioProximo(r, Distancia.metros(latitude, longitude, r.getLat(), r.getLon())))
+                .min(Comparator.comparingDouble(RefugioProximo::distanciaMetros));
     }
 
     /** Setor que contém a coordenada e UBS válida mais próxima; vazio se estiver fora da área atendida. */
@@ -121,13 +139,23 @@ public class GeoService {
                 ubs.add(servico);
             }
         }
-        log.info("Índice territorial carregado: {} setores e {} UBS válidas", carregados, ubs.size());
-        return new Indice(arvore, List.copyOf(ubs));
+        ubs.sort(Comparator.comparing(Servico::getNome, Comparator.nullsLast(Comparator.naturalOrder())));
+
+        List<Servico> refugios = new ArrayList<>();
+        for (Servico servico : servicoRepository.findByTipo(Servico.TIPO_REFUGIO)) {
+            if (servico.getRevisao() != null && revisoesRefugio.contains(servico.getRevisao())
+                    && servico.getLat() != null && servico.getLon() != null) {
+                refugios.add(servico);
+            }
+        }
+        log.info("Índice territorial carregado: {} setores, {} UBS válidas e {} refúgios", carregados, ubs.size(),
+                refugios.size());
+        return new Indice(arvore, List.copyOf(ubs), List.copyOf(refugios));
     }
 
     private record SetorIndexado(Setor setor, PreparedGeometry geometria) {
     }
 
-    private record Indice(STRtree arvore, List<Servico> ubs) {
+    private record Indice(STRtree arvore, List<Servico> ubs, List<Servico> refugios) {
     }
 }
