@@ -73,6 +73,12 @@ public abstract class ApiTestBase {
         inserirServico(UBS_A, "UBS CENTRO", -22.12, -51.39);
         inserirServico(UBS_B, "UBS VILA MARCONDES", -22.12, -51.37);
         inserirServico(UBS_EXCLUIDA, "PENITENCIARIA", -22.12, -51.385);
+        // Nota de calor: setor A é o mais quente (5), setor B nota 2
+        jdbc.update("insert into tmc_calor_setor (codigo_setor, classe_calor, status) values (?, 5, 'OK')", SETOR_A);
+        jdbc.update("insert into tmc_calor_setor (codigo_setor, classe_calor, status) values (?, 2, 'OK')", SETOR_B);
+        // Refúgio válido no setor A (~515 m do ponto padrão). O do setor B está marcado para remover e é ignorado.
+        inserirRefugio("OSM-REFUGIO-A", "Biblioteca Municipal", -22.12, -51.39, "manter");
+        inserirRefugio("OSM-REFUGIO-B", "Galpão desativado", -22.12, -51.37, "remover");
         geoService.recarregar();
 
         when(cepGeocodingService.buscarCoordenadas(anyString())).thenReturn(Optional.empty());
@@ -87,7 +93,8 @@ public abstract class ApiTestBase {
     /** Apaga tudo na ordem das chaves estrangeiras (o H2 é compartilhado entre as classes de teste). */
     public static void limparBanco(JdbcTemplate jdbc) {
         for (String tabela : new String[]{"tmc_contato", "tmc_lista_item", "tmc_lista_busca_ativa",
-                "tmc_orientacao_contato", "tmc_pessoa_sintetica", "tmc_usuario", "tmc_servico", "tmc_setor"}) {
+                "tmc_evento_processado", "tmc_orientacao_contato", "tmc_pessoa_sintetica", "tmc_usuario",
+                "tmc_servico", "tmc_calor_setor", "tmc_setor"}) {
             jdbc.update("delete from " + tabela);
         }
     }
@@ -131,6 +138,27 @@ public abstract class ApiTestBase {
     private void inserirServico(String id, String nome, double lat, double lon) {
         jdbc.update("insert into tmc_servico (id, nome, tipo, lat, lon) values (?, ?, 'UBS', ?, ?)",
                 id, nome, lat, lon);
+    }
+
+    private void inserirRefugio(String id, String nome, double lat, double lon, String revisao) {
+        jdbc.update("insert into tmc_servico (id, nome, tipo, lat, lon, revisao) values (?, ?, 'REFUGIO', ?, ?, ?)",
+                id, nome, lat, lon, revisao);
+    }
+
+    /**
+     * Pessoa sintética inserida direto no banco, como as 5.000 geradas do Censo (sem data de nascimento).
+     * Vulnerabilidades: "S" mora sozinho, "M" mobilidade reduzida, "C" condição crônica.
+     */
+    protected long inserirPessoaSintetica(long id, String nome, int idade, String sexo, String vulnerabilidades,
+                                          String setor, String ubsId, double lat, double lon) {
+        jdbc.update("""
+                        insert into tmc_pessoa_sintetica (id, nome, idade, faixa_etaria, sexo, telefone, lat, lon,
+                            setor_codigo, ubs_ref_id, mora_sozinho, mobilidade_reduzida, condicao_cronica,
+                            consentimento_lgpd, sintetico)
+                        values (?, ?, ?, ?, ?, '+55 18 0000-0000', ?, ?, ?, ?, ?, ?, ?, false, true)""",
+                id, nome, idade, idade >= 70 ? "70+" : "60-69", sexo, lat, lon, setor, ubsId,
+                vulnerabilidades.contains("S"), vulnerabilidades.contains("M"), vulnerabilidades.contains("C"));
+        return id;
     }
 
     private User salvarUsuario(String email, String cpf, UserRole papel, String ubsId) {
