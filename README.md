@@ -129,8 +129,6 @@ cors.allowed-origins=${CORS_ALLOWED_ORIGINS:*}
 
 # Regras do ThermoCity
 thermocity.ubs.excluidas=CNES-8016305,CNES-8016291,CNES-118796
-thermocity.gestor-inicial.email=${GESTOR_INICIAL_EMAIL:}
-thermocity.gestor-inicial.senha=${GESTOR_INICIAL_SENHA:}
 thermocity.refugios.revisoes=manter,potencial
 # Pesos da lista priorizada (os demais estão no arquivo; ver "Regra de prioridade v1")
 thermocity.prioridade.pesos.mora-sozinho=3
@@ -154,8 +152,6 @@ thermocity.rabbitmq.consumidor-ativo=${RABBITMQ_CONSUMIDOR_ATIVO:true}
 | `JWT_ISSUER` | não | emissor do token (deve ser o mesmo na API .NET) | `thermocity` |
 | `JWT_EXPIRATION_HOURS` | não | validade do token em horas | `2` |
 | `CORS_ALLOWED_ORIGINS` | não | origens liberadas para o front | `https://meu-front.vercel.app` |
-| `GESTOR_INICIAL_EMAIL` | na 1ª subida | e-mail do primeiro GESTOR | `gestor@thermocity.dev` |
-| `GESTOR_INICIAL_SENHA` | na 1ª subida | senha do primeiro GESTOR | `<senha forte>` |
 | `DDL_AUTO` | não | estratégia do Hibernate (mantenha `none`) | `none` |
 | `RABBITMQ_HOST` | sim** | servidor do RabbitMQ | `<nome>.canadacentral.azurecontainer.io` |
 | `RABBITMQ_PORT` | não | porta AMQP | `5672` |
@@ -172,10 +168,22 @@ simulação do gestor (`POST /simulacoes/nivel-calor`).
 unidades cadastradas como UBS que **não atendem a população**; elas nunca são escolhidas como UBS de
 referência.
 
-**Gestor inicial.** Ninguém se cadastra como gestor pelo endpoint público. Na subida, se
-`GESTOR_INICIAL_EMAIL` e `GESTOR_INICIAL_SENHA` estiverem definidas e o e-mail ainda não existir, o
-`GestorInicialRunner` cria esse GESTOR. Depois disso, os outros agentes e gestores são criados por
-`POST /usuarios`.
+**Primeiro gestor.** Ninguém se cadastra como gestor pelo endpoint público, e a API não cria usuários
+na subida. O primeiro GESTOR é inserido direto no banco, uma única vez; depois disso, os outros agentes
+e gestores são criados por `POST /usuarios` com o token dele. A senha fica em hash BCrypt (com a
+extensão `pgcrypto`, o próprio PostgreSQL gera o hash):
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+INSERT INTO tmc_usuario (nome, email, senha, telefone, cpf, cep, papel)
+VALUES ('<nome>', '<email em minúsculas>', crypt('<senha forte>', gen_salt('bf', 10)),
+        '<telefone só dígitos>', '<cpf só dígitos>', '<cep só dígitos>', 'GESTOR');
+```
+
+Use um CPF válido e que não esteja em uso, porque `cpf` e `email` são únicos. Não versione esse script
+com a senha preenchida.
+
 
 ### 5. Subir a aplicação
 
@@ -187,8 +195,6 @@ $env:DB_USERNAME = "<usuario>"
 $env:DB_PASSWORD = "<senha>"
 $env:JWT_PRIVATE_KEY = "file:C:/chaves/private_key.pem"
 $env:JWT_PUBLIC_KEY = "file:C:/chaves/public_key.pem"
-$env:GESTOR_INICIAL_EMAIL = "gestor@thermocity.dev"
-$env:GESTOR_INICIAL_SENHA = "<senha forte>"
 $env:RABBITMQ_HOST = "<servidor do RabbitMQ>"
 $env:RABBITMQ_USERNAME = "<usuario>"
 $env:RABBITMQ_PASSWORD = "<senha>"
@@ -203,8 +209,6 @@ export DB_USERNAME="<usuario>"
 export DB_PASSWORD="<senha>"
 export JWT_PRIVATE_KEY="file:/home/eu/chaves/private_key.pem"
 export JWT_PUBLIC_KEY="file:/home/eu/chaves/public_key.pem"
-export GESTOR_INICIAL_EMAIL="gestor@thermocity.dev"
-export GESTOR_INICIAL_SENHA="<senha forte>"
 export RABBITMQ_HOST="<servidor do RabbitMQ>"
 export RABBITMQ_USERNAME="<usuario>"
 export RABBITMQ_PASSWORD="<senha>"
@@ -220,7 +224,7 @@ clique em **Authorize**.
 
 ### 6. Roteiro rápido de teste manual
 
-1. `POST /auth/login` com o gestor inicial → token do GESTOR.
+1. `POST /auth/login` com o primeiro gestor → token do GESTOR.
 2. `POST /usuarios` (GESTOR) → cria um AGENTE vinculado a uma UBS.
 3. `GET /pessoas?size=20` (GESTOR) → lista as pessoas sintéticas do banco.
 4. `POST /auth/cadastro` → cria um CIDADAO; faça login com ele.
@@ -250,7 +254,7 @@ api-java-cadastro/
     │   │   ├── config/              OpenAPI/Swagger e relógio no fuso de Brasília
     │   │   ├── exception/           exceções de negócio e handler global de erros
     │   │   ├── security/            login, cadastro público, JWT e regras de acesso
-    │   │   ├── user/                usuários, papéis, POST /usuarios, gestor inicial
+    │   │   ├── user/                usuários, papéis, POST /usuarios
     │   │   ├── geolocalizacao/      CEP → coordenadas (AwesomeAPI / BrasilAPI)
     │   │   ├── territorio/          setores censitários, UBS, refúgios e GeoService
     │   │   ├── pessoa/              CRUD /pessoas (pessoas acompanhadas)
@@ -464,7 +468,7 @@ Papéis:
 - `User` mapeia `tmc_usuario`. Um AGENTE é obrigado a ter `ubsId`, e o banco também garante isso por
   constraint.
 - `POST /usuarios` (GESTOR) cria AGENTE, GESTOR ou COLETOR.
-- `GestorInicialRunner` cria o primeiro gestor a partir das variáveis de ambiente.
+- O primeiro GESTOR é criado direto no banco por script SQL (ver "Primeiro gestor").
 
 ### `geolocalizacao` — CEP → coordenadas
 
