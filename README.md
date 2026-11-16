@@ -131,6 +131,17 @@ cors.allowed-origins=${CORS_ALLOWED_ORIGINS:*}
 thermocity.ubs.excluidas=CNES-8016305,CNES-8016291,CNES-118796
 thermocity.gestor-inicial.email=${GESTOR_INICIAL_EMAIL:}
 thermocity.gestor-inicial.senha=${GESTOR_INICIAL_SENHA:}
+thermocity.refugios.revisoes=manter,potencial
+# Pesos da lista priorizada (os demais estão no arquivo; ver "Regra de prioridade v1")
+thermocity.prioridade.pesos.mora-sozinho=3
+
+# RabbitMQ (evento de nível de calor publicado pela API .NET)
+spring.rabbitmq.host=${RABBITMQ_HOST:localhost}
+spring.rabbitmq.port=${RABBITMQ_PORT:5672}
+spring.rabbitmq.username=${RABBITMQ_USERNAME:guest}
+spring.rabbitmq.password=${RABBITMQ_PASSWORD:}
+spring.rabbitmq.virtual-host=${RABBITMQ_VHOST:/}
+thermocity.rabbitmq.consumidor-ativo=${RABBITMQ_CONSUMIDOR_ATIVO:true}
 ```
 
 | Variável | Obrigatória | Para que serve | Exemplo |
@@ -146,8 +157,16 @@ thermocity.gestor-inicial.senha=${GESTOR_INICIAL_SENHA:}
 | `GESTOR_INICIAL_EMAIL` | na 1ª subida | e-mail do primeiro GESTOR | `gestor@thermocity.dev` |
 | `GESTOR_INICIAL_SENHA` | na 1ª subida | senha do primeiro GESTOR | `<senha forte>` |
 | `DDL_AUTO` | não | estratégia do Hibernate (mantenha `none`) | `none` |
+| `RABBITMQ_HOST` | sim** | servidor do RabbitMQ | `<nome>.canadacentral.azurecontainer.io` |
+| `RABBITMQ_PORT` | não | porta AMQP | `5672` |
+| `RABBITMQ_USERNAME` | sim** | usuário do RabbitMQ | `<usuario>` |
+| `RABBITMQ_PASSWORD` | sim** | senha do RabbitMQ | `<senha>` |
+| `RABBITMQ_VHOST` | não | virtual host | `/` |
+| `RABBITMQ_CONSUMIDOR_ATIVO` | não | `false` desliga o consumo da fila (a API sobe sem RabbitMQ) | `true` |
 
 \* Sem a variável, a aplicação procura a chave em `classpath:keys/`.
+\** Para receber o evento da API de clima. Sem RabbitMQ a API funciona, e a lista pode ser gerada pela
+simulação do gestor (`POST /simulacoes/nivel-calor`).
 
 `thermocity.ubs.excluidas` não é segredo e por isso fica fixo no arquivo. São os ids das três
 unidades cadastradas como UBS que **não atendem a população**; elas nunca são escolhidas como UBS de
@@ -170,6 +189,9 @@ $env:JWT_PRIVATE_KEY = "file:C:/chaves/private_key.pem"
 $env:JWT_PUBLIC_KEY = "file:C:/chaves/public_key.pem"
 $env:GESTOR_INICIAL_EMAIL = "gestor@thermocity.dev"
 $env:GESTOR_INICIAL_SENHA = "<senha forte>"
+$env:RABBITMQ_HOST = "<servidor do RabbitMQ>"
+$env:RABBITMQ_USERNAME = "<usuario>"
+$env:RABBITMQ_PASSWORD = "<senha>"
 .\gradlew.bat bootRun
 ```
 
@@ -183,6 +205,9 @@ export JWT_PRIVATE_KEY="file:/home/eu/chaves/private_key.pem"
 export JWT_PUBLIC_KEY="file:/home/eu/chaves/public_key.pem"
 export GESTOR_INICIAL_EMAIL="gestor@thermocity.dev"
 export GESTOR_INICIAL_SENHA="<senha forte>"
+export RABBITMQ_HOST="<servidor do RabbitMQ>"
+export RABBITMQ_USERNAME="<usuario>"
+export RABBITMQ_PASSWORD="<senha>"
 ./gradlew bootRun
 ```
 
@@ -200,7 +225,12 @@ clique em **Authorize**.
 3. `GET /pessoas?size=20` (GESTOR) → lista as pessoas sintéticas do banco.
 4. `POST /auth/cadastro` → cria um CIDADAO; faça login com ele.
 5. `POST /pessoas` (CIDADAO) → cadastra um familiar; a resposta mostra o setor e a UBS calculados.
-6. Login como o AGENTE → `POST /contatos` para uma pessoa da UBS dele.
+6. `POST /simulacoes/nivel-calor` (GESTOR) com `{"nivelNovo": 4}` → gera as listas do dia.
+7. Login como o AGENTE → `GET /listas/hoje` → pessoas da UBS dele em ordem de prioridade.
+8. `POST /contatos` (AGENTE) para a primeira da lista → o status dela muda na lista e na
+   `GET /cobertura/hoje` (GESTOR).
+9. `POST /simulacoes/nivel-calor` com `{"nivelNovo": 2}` → as listas do dia são encerradas
+   (`GET /listas/hoje` passa a responder 204).
 
 ---
 
@@ -322,12 +352,94 @@ Regras aplicadas no `PessoaService`:
   `NAO_ATENDEU` continua pendente, e `DADOS_INCORRETOS` aparece à parte. As UBS com menor cobertura
   aparecem primeiro, porque são as que precisam de reforço.
 
-### `busca` — lista de busca ativa
+### `busca` — lista priorizada de busca ativa
 
-Entidades `ListaBuscaAtiva` (uma lista por UBS por dia, com nível de calor e versão da regra) e
-`ListaItem` (pessoa, posição, pontuação, motivos e situação do contato). Hoje elas são usadas pelo
-contato e pela cobertura; a geração automática da lista é a próxima etapa (ver
-[Próximos passos](#próximos-passos)).
+Quando a API de clima (.NET) classifica um dia (hoje ou um dos próximos) como **NC3 ou mais**, esta API
+monta, para **cada UBS**, a lista das pessoas que os agentes daquela UBS devem contatar primeiro. Cada
+pessoa traz **posição, pontuação e motivos**, como "mora sozinha · 78 anos · setor nota 5".
+
+**Fluxo:**
+
+```
+API .NET ──evento NIVEL_CALOR_ALTERADO──▶ RabbitMQ ──▶ NivelCalorListener ──▶ EventoNivelCalorHandler
+                                                                                  │ valida o evento
+GESTOR ── POST /simulacoes/nivel-calor ─────────────────────────────────────────▶ GeracaoListaService
+                                                                                  │ PrioridadeService (regra v1)
+AGENTE / GESTOR ── GET /listas/hoje ──▶ ListaConsultaService ◀── tmc_lista_busca_ativa / tmc_lista_item
+```
+
+#### Regra de prioridade v1 (`PrioridadeService`)
+
+**Alcance:** quem entra na lista depende do nível de calor do dia.
+
+| Nível | Quem entra |
+|---|---|
+| NC1, NC2 | ninguém (não há busca ativa; listas abertas do dia são encerradas) |
+| NC3 | 70+ em setores IPVS 5–6 |
+| NC4 | 60+ em setores IPVS 4–6 |
+| NC5 | todos |
+
+**Pontuação:** cada critério soma pontos. Esses "pesos" ficam em `thermocity.prioridade.pesos.*`, para
+a equipe de saúde ajustar sem mudar código.
+
+| Critério | Pontos | Origem do dado |
+|---|---|---|
+| mora sozinho | 3 | cadastro da pessoa |
+| mobilidade reduzida | 2 | cadastro da pessoa |
+| condição crônica | 2 | cadastro da pessoa |
+| 70 anos ou mais | 2 | data de nascimento (ou idade/faixa das pessoas sintéticas) |
+| nota de calor do setor | 0 a 4 (nota − 1) | `tmc_calor_setor.classe_calor` (1 = mais fresco, 5 = mais quente) |
+| setor IPVS 5–6 / IPVS 4 | 2 / 1 | `tmc_setor.ipvs_grupo` |
+| refúgio a mais de 800 m | 1 | refúgio mais próximo com `revisao` = `manter` ou `potencial` (101 locais) |
+
+O máximo é 16 pontos. Empates são resolvidos pela idade (mais velho primeiro) e depois pelo id.
+
+#### Geração (`GeracaoListaService`)
+
+- **NC3 ou mais:** uma lista por UBS para o dia, mesmo que fique vazia.
+- **Novo evento para o mesmo dia** (ex.: NC3 → NC4): a lista existente é **ampliada** com quem passou a
+  entrar no alcance. O status dos contatos já feitos é preservado, e a ordem é recalculada pela
+  pontuação. Se o nível cair, mas continuar em NC3 ou mais, ninguém sai da lista.
+- **Abaixo de NC3:** as listas abertas do dia são **encerradas**. Se o calor voltar no mesmo dia, elas
+  são reabertas com o andamento dos contatos.
+- **Pessoa sem setor ou sem UBS válida:** fica fora e é registrada no log para correção do cadastro. O
+  total aparece em `pessoasSemCadastroCompleto`.
+- **Idempotência:** o `idEvento` é gravado em `tmc_evento_processado`. Um evento repetido não gera nada.
+- **Volume:** os itens são gravados em lote via JDBC (no NC5 são cerca de 5.000 pessoas).
+
+#### Evento e RabbitMQ (contrato com a API .NET)
+
+A API Java declara a topologia no broker na primeira conexão:
+
+| Elemento | Nome | Tipo |
+|---|---|---|
+| exchange | `thermocity.clima` | topic, durável |
+| routing key | `nivel-calor.alterado` | |
+| fila | `thermocity.cadastro.nivel-calor` | durável, com DLX |
+| exchange de erro | `thermocity.clima.dlx` | direct |
+| fila de erro (DLQ) | `thermocity.cadastro.nivel-calor.dlq` | durável |
+
+A API .NET publica na exchange `thermocity.clima` com a routing key `nivel-calor.alterado` e
+`content-type: application/json`:
+
+```json
+{
+  "idEvento": "6f1c2a9e-...",
+  "tipo": "NIVEL_CALOR_ALTERADO",
+  "dataLocal": "2026-11-16",
+  "nivelAnterior": 2,
+  "nivelNovo": 3,
+  "icMaxC": 38.4,
+  "origem": "PREVISTO",
+  "ocorridoEm": "2026-11-15T06:00:00-03:00"
+}
+```
+
+- **Obrigatórios:** `idEvento` (até 64 caracteres, único por evento), `dataLocal` e `nivelNovo` (1 a 5).
+  Os demais campos são informativos, e campos extras são ignorados.
+- **Mensagem inválida** (JSON ruim, sem nível, nível fora de 1 a 5): vai para a **DLQ**, com o motivo
+  no log.
+- **Falha inesperada** (ex.: banco fora do ar): 3 tentativas e depois a DLQ.
 
 ### `security` — autenticação e autorização
 
@@ -398,6 +510,9 @@ O `GlobalExceptionHandler` converte as exceções no [formato de erro](#formato-
 | GET | `/contatos?pessoa=&resultado=&page=0&size=10` | AGENTE, GESTOR | histórico, do mais recente para o mais antigo |
 | GET | `/contatos/{id}` | AGENTE, GESTOR | detalhe |
 | GET | `/cobertura/hoje` | GESTOR | cobertura da lista do dia (204 se não houver lista) |
+| GET | `/listas/hoje?ubs=&page=0&size=20` | AGENTE (sua UBS), GESTOR | lista priorizada do dia, por posição (204 se não houver busca ativa) |
+| GET | `/listas?data=AAAA-MM-DD&ubs=&page=0&size=20` | AGENTE (sua UBS), GESTOR | lista de outra data (ex.: amanhã, pela previsão) |
+| POST | `/simulacoes/nivel-calor?viaFila=false` | GESTOR | simula o evento de nível de calor (demonstração) |
 
 ### Exemplos
 
@@ -527,6 +642,8 @@ Mensagens de regra de negócio mais comuns:
 | id inexistente | 404 | Pessoa não encontrada |
 | e-mail ou CPF repetido | 409 | E-mail já cadastrado / CPF já cadastrado |
 | resultado de contato desconhecido | 422 | Resultado de contato inválido (valores válidos em `detalhes`) |
+| agente pede a lista de outra UBS | 403 | O agente só consulta a lista da sua UBS |
+| sem busca ativa no dia (NC1/NC2) | 204 | — |
 
 ---
 
@@ -542,7 +659,9 @@ Os testes **não acessam o banco do Azure nem a internet**:
 - usam **H2 em memória** (`src/test/resources/application.properties`), com o schema criado pelo
   Hibernate;
 - usam um **par de chaves exclusivo** em `src/test/resources/keys-test/`;
-- substituem a consulta de CEP por um mock (`@MockitoBean`).
+- substituem a consulta de CEP por um mock (`@MockitoBean`);
+- não conectam no RabbitMQ (`thermocity.rabbitmq.consumidor-ativo=false`): o tratamento do evento é
+  testado chamando o `EventoNivelCalorHandler` direto.
 
 Por isso rodam em qualquer máquina e no CI sem nenhuma variável de ambiente. O relatório fica em
 `build/reports/tests/test/index.html`.
@@ -555,6 +674,9 @@ Classe base dos testes de API (`@SpringBootTest` + `MockMvc`). Antes de cada tes
 2. cria um **território mínimo**:
    - **setor A** (IPVS 5) e **setor B** (IPVS 3), dois retângulos vizinhos;
    - **UBS A** e **UBS B**;
+   - nota de calor 5 no setor A e 2 no setor B;
+   - um refúgio válido (`manter`) no setor A e um marcado para `remover` no setor B, que deve ser
+     ignorado;
    - uma unidade excluída (`CNES-PRISAO`) posicionada **exatamente** no ponto padrão de cadastro, para
      provar que ela nunca é escolhida;
 3. cria um usuário de cada papel (`cidadao`, `outroCidadao`, `agenteA`, `agenteB`, `gestor`) e gera os
@@ -562,6 +684,7 @@ Classe base dos testes de API (`@SpringBootTest` + `MockMvc`). Antes de cada tes
 
 Também oferece atalhos como `pessoaJson("Nome")` (78 anos, consentimento, coordenada no setor A) e
 `cadastrarPessoa(titular, json)`, que cadastra pelo endpoint e devolve o id lido do header `Location`.
+O atalho `inserirPessoaSintetica(...)` grava direto no banco uma pessoa como as geradas do Censo.
 
 ### Exemplo de teste
 
@@ -586,10 +709,11 @@ void contatoRegistradoAtualizaASituacaoNaListaDoDia() throws Exception {
 }
 ```
 
-### O que está coberto (51 testes)
+### O que está coberto (65 testes)
 
 | Classe | Cenários |
 |---|---|
+| `ListaControllerTest` (14) | NC3 gera uma lista por UBS em ordem de pontuação, com motivos e refúgio mais próximo; alcance NC3 → NC4 → NC5 (empate resolvido pela idade); refúgio "remover" ignorado; NC2 encerra, e a volta do calor reabre preservando o status do contato; contato registrado aparece na lista; lista de amanhã por `?data=`; 204 sem lista; 403 para outra UBS e para CIDADAO; gestor vê todas as UBS ou uma; paginação; simulação só para GESTOR e com nível 1–5; evento da fila gera lista e evento repetido é ignorado; nível baixo sem lista não faz nada; mensagem inválida vai para a DLQ |
 | `PessoaControllerTest` (16) | cadastro calcula setor, UBS, titular e consentimento; sem consentimento, menor de 60 ou fora da cidade → 400 sem gravar nada; agente não cadastra; listagem de 12 itens em 2 páginas; agente vê só a sua UBS e gestor filtra por setor; paginação inválida; 404; cidadão não vê nem altera cadastro de outro; `PUT` com nova coordenada recalcula setor e UBS; exclusão anonimiza contatos e itens de lista; id não numérico |
 | `ContatoControllerTest` (12) | contato atualiza a lista do dia; contato fora de lista aberta é gravado sem item; `PRECISA_AJUDA` destacado; 422 com valores válidos; 403 para outra UBS e para papéis sem permissão; 404; histórico paginado; cobertura por UBS e setor (5 de 8 = 62,5%); 204 sem lista |
 | `UsuarioControllerTest` (5) | gestor cria agente; agente sem UBS ou com unidade excluída → 400; CIDADAO não é criado por esse endpoint; só GESTOR cria usuários; `/auth/cadastro` |
@@ -618,11 +742,7 @@ void contatoRegistradoAtualizaASituacaoNaListaDoDia() throws Exception {
 
 ## Próximos passos
 
-- Geração da lista de busca ativa (regra v1: idade, mora sozinho, mobilidade, condição crônica, IPVS do
-  setor) e `GET /listas/hoje`.
-- Integração com a API de clima por **RabbitMQ**: evento `NIVEL_CALOR_ALTERADO` → gera ou encerra
-  as listas, com fila de erro (DLQ) e idempotência (`tmc_evento_processado`).
-- Endpoint de simulação de nível de calor para o GESTOR (demonstração).
+- API .NET: publicar o evento `NIVEL_CALOR_ALTERADO` no formato acima (o lado Java já consome).
 - Orientações personalizadas por pessoa (`tmc_orientacao_contato`) com IA generativa.
 
 ---
