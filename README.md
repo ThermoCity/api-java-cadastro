@@ -254,7 +254,7 @@ api-java-cadastro/
     │   │   ├── config/              OpenAPI/Swagger e relógio no fuso de Brasília
     │   │   ├── exception/           exceções de negócio e handler global de erros
     │   │   ├── security/            login, cadastro público, JWT e regras de acesso
-    │   │   ├── user/                usuários, papéis, POST /usuarios
+    │   │   ├── user/                usuários, papéis, /usuarios e /usuarios/me
     │   │   ├── geolocalizacao/      CEP → coordenadas (AwesomeAPI / BrasilAPI)
     │   │   ├── territorio/          setores censitários, UBS, refúgios e GeoService
     │   │   ├── pessoa/              CRUD /pessoas (pessoas acompanhadas)
@@ -468,6 +468,9 @@ Papéis:
 - `User` mapeia `tmc_usuario`. Um AGENTE é obrigado a ter `ubsId`, e o banco também garante isso por
   constraint.
 - `POST /usuarios` (GESTOR) cria AGENTE, GESTOR ou COLETOR.
+- `GET /usuarios` e `GET /usuarios/{id}` (GESTOR) listam e detalham todos os cadastros, com filtro por papel e UBS.
+- `GET /usuarios/me`, `PUT /usuarios/me` e `PUT /usuarios/me/senha` (qualquer papel) mostram e alteram
+  **só o cadastro do dono do token**. CPF, papel e UBS não mudam por aí; trocar o e-mail exige novo login.
 - O primeiro GESTOR é criado direto no banco por script SQL (ver "Primeiro gestor").
 
 ### `geolocalizacao` — CEP → coordenadas
@@ -505,6 +508,11 @@ O `GlobalExceptionHandler` converte as exceções no [formato de erro](#formato-
 | POST | `/auth/cadastro` | público | cadastro de cidadão (`/auth/register` também funciona) |
 | POST | `/auth/login` | público | login, devolve JWT |
 | POST | `/usuarios` | GESTOR | cria AGENTE, GESTOR ou COLETOR |
+| GET | `/usuarios?papel=&ubs=&page=&size=` | GESTOR | lista todos os usuários, ordenados por nome |
+| GET | `/usuarios/{id}` | GESTOR | detalha um usuário |
+| GET | `/usuarios/me` | autenticado | mostra o próprio cadastro |
+| PUT | `/usuarios/me` | autenticado | altera nome, e-mail, telefone e CEP do próprio cadastro |
+| PUT | `/usuarios/me/senha` | autenticado | troca a própria senha (exige a atual) |
 | POST | `/pessoas` | CIDADAO | cadastra pessoa acompanhada (201 + `Location`) |
 | GET | `/pessoas?ubs=&setor=&nome=&page=0&size=10` | CIDADAO, AGENTE, GESTOR | lista paginada, ordenada por nome |
 | GET | `/pessoas/{id}` | CIDADAO, AGENTE, GESTOR | detalhe |
@@ -713,14 +721,14 @@ void contatoRegistradoAtualizaASituacaoNaListaDoDia() throws Exception {
 }
 ```
 
-### O que está coberto (65 testes)
+### O que está coberto (75 testes)
 
 | Classe | Cenários |
 |---|---|
 | `ListaControllerTest` (14) | NC3 gera uma lista por UBS em ordem de pontuação, com motivos e refúgio mais próximo; alcance NC3 → NC4 → NC5 (empate resolvido pela idade); refúgio "remover" ignorado; NC2 encerra, e a volta do calor reabre preservando o status do contato; contato registrado aparece na lista; lista de amanhã por `?data=`; 204 sem lista; 403 para outra UBS e para CIDADAO; gestor vê todas as UBS ou uma; paginação; simulação só para GESTOR e com nível 1–5; evento da fila gera lista e evento repetido é ignorado; nível baixo sem lista não faz nada; mensagem inválida vai para a DLQ |
 | `PessoaControllerTest` (16) | cadastro calcula setor, UBS, titular e consentimento; sem consentimento, menor de 60 ou fora da cidade → 400 sem gravar nada; agente não cadastra; listagem de 12 itens em 2 páginas; agente vê só a sua UBS e gestor filtra por setor; paginação inválida; 404; cidadão não vê nem altera cadastro de outro; `PUT` com nova coordenada recalcula setor e UBS; exclusão anonimiza contatos e itens de lista; id não numérico |
 | `ContatoControllerTest` (12) | contato atualiza a lista do dia; contato fora de lista aberta é gravado sem item; `PRECISA_AJUDA` destacado; 422 com valores válidos; 403 para outra UBS e para papéis sem permissão; 404; histórico paginado; cobertura por UBS e setor (5 de 8 = 62,5%); 204 sem lista |
-| `UsuarioControllerTest` (5) | gestor cria agente; agente sem UBS ou com unidade excluída → 400; CIDADAO não é criado por esse endpoint; só GESTOR cria usuários; `/auth/cadastro` |
+| `UsuarioControllerTest` (15) | gestor cria agente; agente sem UBS ou com unidade excluída → 400; CIDADAO não é criado por esse endpoint; só GESTOR cria usuários; `/auth/cadastro`; gestor lista, filtra e detalha usuários (sem senha nem CPF); outros papéis → 403; cada um vê e altera só o próprio cadastro, sem trocar papel ou UBS; e-mail de outro → 409; troca de senha exige a atual |
 | `AuthenticationControllerTest` (10) | cadastro com coordenadas do CEP; papel enviado é ignorado; geocodificação indisponível; CEP inexistente; e-mail repetido (409); validação; login, senha errada e token inválido |
 | `CepGeocodingServiceTest` (5) | AwesomeAPI; fallback para BrasilAPI; CEP inexistente nas duas; CEP sem coordenadas; as duas fora do ar |
 | `OpenApiDocumentationTest` (2) | Swagger e `/v3/api-docs` publicados |
