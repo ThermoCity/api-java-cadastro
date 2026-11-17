@@ -78,6 +78,21 @@ public class User implements UserDetails {
         this.dataCriacao = OffsetDateTime.now();
     }
 
+    /** Atualiza os dados que o próprio usuário pode mudar (CPF, papel e UBS ficam como estão). */
+    public void atualizarDados(String nome, String email, String telefone, String cep,
+                               Double latitude, Double longitude) {
+        this.nome = nome;
+        this.email = email;
+        this.telefone = telefone;
+        this.cep = cep;
+        this.latitude = latitude;
+        this.longitude = longitude;
+    }
+
+    public void alterarSenha(String senhaHash) {
+        this.senha = senhaHash;
+    }
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority("ROLE_" + papel.name()));
