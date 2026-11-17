@@ -69,7 +69,7 @@ public class AuthenticationController {
         return ResponseEntity.ok(new LoginResponseDTO(token.valor(), "Bearer", user.getPapel().name(), token.expiraEm()));
     }
 
-    @PostMapping({"/cadastro", "/register"})
+    @PostMapping({"/cadastro"})
     @Operation(summary = "Cadastra um cidadão",
             description = "Cadastro público: o usuário é sempre criado com papel **CIDADAO** (outros papéis têm "
                     + "fluxo próprio). O CEP é convertido em latitude/longitude pela AwesomeAPI, com a BrasilAPI "
