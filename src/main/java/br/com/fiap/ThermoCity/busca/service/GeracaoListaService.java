@@ -7,6 +7,7 @@ import br.com.fiap.ThermoCity.busca.model.ListaBuscaAtiva;
 import br.com.fiap.ThermoCity.busca.model.StatusLista;
 import br.com.fiap.ThermoCity.busca.repository.EventoProcessadoRepository;
 import br.com.fiap.ThermoCity.busca.repository.ListaBuscaAtivaRepository;
+import br.com.fiap.ThermoCity.busca.repository.PriorizacaoBancoRepository;
 import br.com.fiap.ThermoCity.busca.service.PrioridadeService.Avaliacao;
 import br.com.fiap.ThermoCity.pessoa.model.Pessoa;
 import br.com.fiap.ThermoCity.pessoa.repository.PessoaRepository;
@@ -16,6 +17,7 @@ import br.com.fiap.ThermoCity.territorio.repository.CalorSetorRepository;
 import br.com.fiap.ThermoCity.territorio.service.GeoService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,6 +44,13 @@ import java.util.stream.Collectors;
  * - existe no máximo uma lista por UBS por dia; um novo evento para o mesmo dia atualiza essa lista,
  *   acrescentando quem passou a entrar no alcance e preservando o status dos contatos já feitos;
  * - a ordem é recalculada pela pontuação a cada atualização.
+ *
+ * Onde a priorização roda (thermocity.busca.priorizacao):
+ * - "banco" (padrão): a procedure tmc_prc_gerar_lista_busca_ativa monta as listas no PostgreSQL
+ *   (scripts/script-priorizacao.sql). A trigger tmc_trg_pessoa_reorganiza_lista chama a mesma procedure
+ *   quando o cadastro de pessoas muda, então a lista do dia se reorganiza sozinha.
+ * - "java": a mesma regra v1 em Java (PrioridadeService). Usada nos testes, que rodam em H2, sem PL/pgSQL.
+ * A idempotência do evento e o encerramento das listas (abaixo de NC3) ficam aqui nos dois modos.
  */
 @Service
 public class GeracaoListaService {
@@ -61,11 +70,16 @@ public class GeracaoListaService {
     private final PrioridadeService prioridadeService;
     private final JdbcTemplate jdbc;
     private final Clock clock;
+    private final PriorizacaoBancoRepository priorizacaoBanco;
+    private final boolean priorizacaoNoBanco;
+    private final Set<String> ubsExcluidas;
 
     public GeracaoListaService(ListaBuscaAtivaRepository listaRepository, EventoProcessadoRepository eventoRepository,
                                PessoaRepository pessoaRepository, CalorSetorRepository calorSetorRepository,
                                GeoService geoService, PrioridadeService prioridadeService, JdbcTemplate jdbc,
-                               Clock clock) {
+                               Clock clock, PriorizacaoBancoRepository priorizacaoBanco,
+                               @Value("${thermocity.busca.priorizacao:banco}") String priorizacao,
+                               @Value("${thermocity.ubs.excluidas:}") Set<String> ubsExcluidas) {
         this.listaRepository = listaRepository;
         this.eventoRepository = eventoRepository;
         this.pessoaRepository = pessoaRepository;
@@ -74,6 +88,9 @@ public class GeracaoListaService {
         this.prioridadeService = prioridadeService;
         this.jdbc = jdbc;
         this.clock = clock;
+        this.priorizacaoBanco = priorizacaoBanco;
+        this.priorizacaoNoBanco = !"java".equalsIgnoreCase(priorizacao);
+        this.ubsExcluidas = ubsExcluidas;
     }
 
     /** O evento precisa estar válido (EventoNivelCalor.erros() vazio). */
@@ -104,6 +121,24 @@ public class GeracaoListaService {
     }
 
     private ResultadoProcessamento gerar(EventoNivelCalor evento) {
+        return priorizacaoNoBanco ? gerarNoBanco(evento) : gerarEmJava(evento);
+    }
+
+    /** Priorização pela procedure do banco (modo padrão). */
+    private ResultadoProcessamento gerarNoBanco(EventoNivelCalor evento) {
+        PriorizacaoBancoRepository.Resultado r = priorizacaoBanco.gerar(evento.dataLocal(), evento.nivelNovo(),
+                evento.idEvento(), ubsExcluidas, prioridadeService.versaoRegra());
+        if (r.semCadastroCompleto() > 0) {
+            log.warn("{} pessoas fora da busca ativa: sem setor ou sem UBS válida. Corrigir o cadastro.",
+                    r.semCadastroCompleto());
+        }
+        return new ResultadoProcessamento(evento.idEvento(), evento.dataLocal(), evento.nivelNovo(),
+                AcaoEvento.LISTAS_GERADAS, r.listasAfetadas(), r.pessoasIncluidas(), r.totalNasListas(),
+                r.semCadastroCompleto());
+    }
+
+    /** Priorização em Java (testes em H2). Mesma regra e mesmo resultado da procedure. */
+    private ResultadoProcessamento gerarEmJava(EventoNivelCalor evento) {
         LocalDate data = evento.dataLocal();
         int nivel = evento.nivelNovo();
         List<Servico> ubsValidas = geoService.ubsValidas();

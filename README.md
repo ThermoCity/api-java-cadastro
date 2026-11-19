@@ -411,6 +411,17 @@ O máximo é 16 pontos. Empates são resolvidos pela idade (mais velho primeiro)
 - **Idempotência:** o `idEvento` é gravado em `tmc_evento_processado`. Um evento repetido não gera nada.
 - **Volume:** os itens são gravados em lote via JDBC (no NC5 são cerca de 5.000 pessoas).
 
+#### Priorização no banco (procedure e trigger)
+
+A regra de prioridade v1 roda no PostgreSQL (`scripts/script-priorizacao.sql`, rodar depois do `script-bd.sql`):
+
+| Objeto | O que faz |
+|---|---|
+| `tmc_prc_gerar_lista_busca_ativa(data, nivel, evento_id, ...)` | Monta ou atualiza a lista de cada UBS para o dia: alcance do nível, pontuação, motivos e posição. Preserva o status dos contatos já feitos |
+| `tmc_trg_pessoa_reorganiza_lista` | `AFTER INSERT OR UPDATE` em `tmc_pessoa_sintetica`, por comando: se há lista aberta hoje, chama a procedure e a lista se reorganiza |
+
+A API chama a procedure ao receber um evento de NC3 ou mais (`thermocity.busca.priorizacao=banco`, padrão). A idempotência do evento e o encerramento das listas (abaixo de NC3) continuam na API. Nos testes (H2, sem PL/pgSQL), `thermocity.busca.priorizacao=java` usa a mesma regra em Java.
+
 #### Evento e RabbitMQ (contrato com a API .NET)
 
 A API Java declara a topologia no broker na primeira conexão:
@@ -447,7 +458,7 @@ A API .NET publica na exchange `thermocity.clima` com a routing key `nivel-calor
 
 ### `security` — autenticação e autorização
 
-- `POST /auth/cadastro` (ou `/auth/register`) é público e cria sempre um **CIDADAO**. Um `papel`
+- `POST /auth/cadastro` é público e cria sempre um **CIDADAO**. Um `papel`
   enviado no corpo é ignorado. O CEP é convertido em coordenadas pelo módulo `geolocalizacao`.
 - `POST /auth/login` devolve um **JWT RS256** com o papel do usuário e a data de expiração.
 - O `SecurityFilter` lê o header `Authorization: Bearer <token>` em toda requisição. As permissões por
@@ -505,7 +516,7 @@ O `GlobalExceptionHandler` converte as exceções no [formato de erro](#formato-
 
 | Método | Rota | Papel | Descrição |
 |---|---|---|---|
-| POST | `/auth/cadastro` | público | cadastro de cidadão (`/auth/register` também funciona) |
+| POST | `/auth/cadastro` | público | cadastro de cidadão |
 | POST | `/auth/login` | público | login, devolve JWT |
 | POST | `/usuarios` | GESTOR | cria AGENTE, GESTOR ou COLETOR |
 | GET | `/usuarios?papel=&ubs=&page=&size=` | GESTOR | lista todos os usuários, ordenados por nome |
@@ -728,7 +739,7 @@ void contatoRegistradoAtualizaASituacaoNaListaDoDia() throws Exception {
 | `ListaControllerTest` (14) | NC3 gera uma lista por UBS em ordem de pontuação, com motivos e refúgio mais próximo; alcance NC3 → NC4 → NC5 (empate resolvido pela idade); refúgio "remover" ignorado; NC2 encerra, e a volta do calor reabre preservando o status do contato; contato registrado aparece na lista; lista de amanhã por `?data=`; 204 sem lista; 403 para outra UBS e para CIDADAO; gestor vê todas as UBS ou uma; paginação; simulação só para GESTOR e com nível 1–5; evento da fila gera lista e evento repetido é ignorado; nível baixo sem lista não faz nada; mensagem inválida vai para a DLQ |
 | `PessoaControllerTest` (16) | cadastro calcula setor, UBS, titular e consentimento; sem consentimento, menor de 60 ou fora da cidade → 400 sem gravar nada; agente não cadastra; listagem de 12 itens em 2 páginas; agente vê só a sua UBS e gestor filtra por setor; paginação inválida; 404; cidadão não vê nem altera cadastro de outro; `PUT` com nova coordenada recalcula setor e UBS; exclusão anonimiza contatos e itens de lista; id não numérico |
 | `ContatoControllerTest` (12) | contato atualiza a lista do dia; contato fora de lista aberta é gravado sem item; `PRECISA_AJUDA` destacado; 422 com valores válidos; 403 para outra UBS e para papéis sem permissão; 404; histórico paginado; cobertura por UBS e setor (5 de 8 = 62,5%); 204 sem lista |
-| `UsuarioControllerTest` (15) | gestor cria agente; agente sem UBS ou com unidade excluída → 400; CIDADAO não é criado por esse endpoint; só GESTOR cria usuários; `/auth/cadastro`; gestor lista, filtra e detalha usuários (sem senha nem CPF); outros papéis → 403; cada um vê e altera só o próprio cadastro, sem trocar papel ou UBS; e-mail de outro → 409; troca de senha exige a atual |
+| `UsuarioControllerTest` (15) | gestor cria agente; agente sem UBS ou com unidade excluída → 400; CIDADAO não é criado por esse endpoint; só GESTOR cria usuários; `/auth/cadastro`; gestor lista, filtra e detalha usuários (com CPF, sem senha); outros papéis → 403; cada um vê e altera só o próprio cadastro, sem trocar papel ou UBS; e-mail de outro → 409; troca de senha exige a atual |
 | `AuthenticationControllerTest` (10) | cadastro com coordenadas do CEP; papel enviado é ignorado; geocodificação indisponível; CEP inexistente; e-mail repetido (409); validação; login, senha errada e token inválido |
 | `CepGeocodingServiceTest` (5) | AwesomeAPI; fallback para BrasilAPI; CEP inexistente nas duas; CEP sem coordenadas; as duas fora do ar |
 | `OpenApiDocumentationTest` (2) | Swagger e `/v3/api-docs` publicados |
@@ -743,7 +754,7 @@ void contatoRegistradoAtualizaASituacaoNaListaDoDia() throws Exception {
 
 - O cadastro só é aceito com **consentimento explícito**, e a data/hora do consentimento é gravada.
 - O cidadão vê **apenas** as pessoas que ele cadastrou; o agente, apenas as da sua UBS.
-- `cpf` e `senha` nunca aparecem nas respostas; a senha é guardada com BCrypt.
+- `senha` nunca aparece nas respostas e é guardada com BCrypt; o `cpf` é devolvido nas respostas de usuário.
 - **Direito de eliminação**: `DELETE /pessoas/{id}` apaga o registro e as orientações de contato da
   pessoa. Os contatos e os itens de lista são preservados para a estatística de cobertura, mas
   **anonimizados**: perdem o vínculo com a pessoa e a observação em texto livre.
