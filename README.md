@@ -411,6 +411,17 @@ O máximo é 16 pontos. Empates são resolvidos pela idade (mais velho primeiro)
 - **Idempotência:** o `idEvento` é gravado em `tmc_evento_processado`. Um evento repetido não gera nada.
 - **Volume:** os itens são gravados em lote via JDBC (no NC5 são cerca de 5.000 pessoas).
 
+#### Priorização no banco (procedure e trigger)
+
+A regra de prioridade v1 roda no PostgreSQL (`scripts/script-priorizacao.sql`, rodar depois do `script-bd.sql`):
+
+| Objeto | O que faz |
+|---|---|
+| `tmc_prc_gerar_lista_busca_ativa(data, nivel, evento_id, ...)` | Monta ou atualiza a lista de cada UBS para o dia: alcance do nível, pontuação, motivos e posição. Preserva o status dos contatos já feitos |
+| `tmc_trg_pessoa_reorganiza_lista` | `AFTER INSERT OR UPDATE` em `tmc_pessoa_sintetica`, por comando: se há lista aberta hoje, chama a procedure e a lista se reorganiza |
+
+A API chama a procedure ao receber um evento de NC3 ou mais (`thermocity.busca.priorizacao=banco`, padrão). A idempotência do evento e o encerramento das listas (abaixo de NC3) continuam na API. Nos testes (H2, sem PL/pgSQL), `thermocity.busca.priorizacao=java` usa a mesma regra em Java.
+
 #### Evento e RabbitMQ (contrato com a API .NET)
 
 A API Java declara a topologia no broker na primeira conexão:
