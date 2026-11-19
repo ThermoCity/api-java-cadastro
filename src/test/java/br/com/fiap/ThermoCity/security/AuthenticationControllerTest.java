@@ -57,7 +57,7 @@ class AuthenticationControllerTest {
         when(cepGeocodingService.buscarCoordenadas("19010000"))
                 .thenReturn(Optional.of(new Coordenadas(-22.1228739, -51.3897085)));
 
-        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
+        mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.papel").value("CIDADAO"))
                 .andExpect(jsonPath("$.email").value("maria@exemplo.com"))
@@ -66,7 +66,7 @@ class AuthenticationControllerTest {
                 .andExpect(jsonPath("$.longitude").value(-51.3897085))
                 .andExpect(jsonPath("$.localizacaoEncontrada").value(true))
                 .andExpect(jsonPath("$.senha").doesNotExist())
-                .andExpect(jsonPath("$.cpf").doesNotExist());
+                .andExpect(jsonPath("$.cpf").value("52998224725"));
 
         User salvo = userRepository.findByEmail("maria@exemplo.com").orElseThrow();
         assertThat(salvo.getCpf()).isEqualTo("52998224725");
@@ -79,7 +79,7 @@ class AuthenticationControllerTest {
         when(cepGeocodingService.buscarCoordenadas(anyString())).thenReturn(Optional.empty());
         String comPapel = CADASTRO_VALIDO.replace("\"nome\"", "\"papel\":\"GESTOR\",\"nome\"");
 
-        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(comPapel))
+        mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content(comPapel))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.papel").value("CIDADAO"));
     }
@@ -88,7 +88,7 @@ class AuthenticationControllerTest {
     void geocodificacaoIndisponivelCadastraSemCoordenadas() throws Exception {
         when(cepGeocodingService.buscarCoordenadas(anyString())).thenReturn(Optional.empty());
 
-        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
+        mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.latitude").doesNotExist())
                 .andExpect(jsonPath("$.localizacaoEncontrada").value(false));
@@ -98,7 +98,7 @@ class AuthenticationControllerTest {
     void cepInexistenteResponde400() throws Exception {
         when(cepGeocodingService.buscarCoordenadas(anyString())).thenThrow(new CepNaoEncontradoException("19010000"));
 
-        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
+        mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.mensagem").value("CEP 19010000 não encontrado"));
         assertThat(userRepository.count()).isZero();
@@ -107,10 +107,10 @@ class AuthenticationControllerTest {
     @Test
     void emailRepetidoResponde409() throws Exception {
         when(cepGeocodingService.buscarCoordenadas(anyString())).thenReturn(Optional.empty());
-        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
+        mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
+        mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.mensagem").value("E-mail já cadastrado"));
     }
@@ -121,7 +121,7 @@ class AuthenticationControllerTest {
                 {"nome":"","email":"nao-e-email","senha":"123",
                  "telefone":"abc","cpf":"111.111.111-11","cep":"123"}""";
 
-        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(invalido))
+        mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content(invalido))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.detalhes.length()").value(6));
     }
@@ -129,7 +129,7 @@ class AuthenticationControllerTest {
     @Test
     void loginValidoDevolveTokenComPapel() throws Exception {
         when(cepGeocodingService.buscarCoordenadas(anyString())).thenReturn(Optional.empty());
-        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
+        mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)
@@ -144,7 +144,7 @@ class AuthenticationControllerTest {
     @Test
     void senhaErradaResponde401() throws Exception {
         when(cepGeocodingService.buscarCoordenadas(anyString())).thenReturn(Optional.empty());
-        mockMvc.perform(post("/auth/register").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
+        mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content(CADASTRO_VALIDO))
                 .andExpect(status().isCreated());
 
         mockMvc.perform(post("/auth/login").contentType(MediaType.APPLICATION_JSON)

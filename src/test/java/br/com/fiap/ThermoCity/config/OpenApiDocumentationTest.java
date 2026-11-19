@@ -25,7 +25,8 @@ class OpenApiDocumentationTest {
                 .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
                 .andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))
                 .andExpect(jsonPath("$.paths['/auth/login'].post").exists())
-                .andExpect(jsonPath("$.paths['/auth/register'].post").exists())
+                .andExpect(jsonPath("$.paths['/auth/cadastro'].post").exists())
+                .andExpect(jsonPath("$.paths['/auth/register']").doesNotExist())
                 // endpoints públicos não exigem token na documentação
                 .andExpect(jsonPath("$.paths['/auth/login'].post.security").isEmpty());
     }

@@ -63,7 +63,7 @@ public class UsuarioController {
     @GetMapping
     @PreAuthorize("hasRole('GESTOR')")
     @Operation(summary = "Lista todos os usuários cadastrados, paginado e ordenado por nome (GESTOR)",
-            description = "Filtros opcionais por papel e por UBS de atuação. Senha e CPF nunca são devolvidos.")
+            description = "Filtros opcionais por papel e por UBS de atuação. A senha nunca é devolvida.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Página de usuários"),
             @ApiResponse(responseCode = "400", description = "Papel inválido, page negativo ou size fora de 1 a 100",
