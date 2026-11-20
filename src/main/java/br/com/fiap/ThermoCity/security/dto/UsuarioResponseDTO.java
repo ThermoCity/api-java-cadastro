@@ -3,7 +3,7 @@ package br.com.fiap.ThermoCity.security.dto;
 import br.com.fiap.ThermoCity.user.model.User;
 import io.swagger.v3.oas.annotations.media.Schema;
 
-@Schema(description = "Usuário cadastrado. Senha e CPF nunca são devolvidos.")
+@Schema(description = "Usuário cadastrado. A senha nunca é devolvida.")
 public record UsuarioResponseDTO(
         @Schema(example = "1") Long id,
         @Schema(example = "Maria Silva") String nome,

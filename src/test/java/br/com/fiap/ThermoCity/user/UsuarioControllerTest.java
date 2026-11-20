@@ -68,7 +68,7 @@ class UsuarioControllerTest extends ApiTestBase {
     }
 
     @Test
-    void cadastroPublicoTambemRespondeEmAuthCadastro() throws Exception {
+    void cadastroPublicoEmAuthCadastroCriaCidadao() throws Exception {
         mockMvc.perform(post("/auth/cadastro").contentType(MediaType.APPLICATION_JSON).content("""
                         {"nome":"Ana","email":"ana@exemplo.com","senha":"senhaForte123",
                          "telefone":"(18) 99999-1234","cpf":"935.411.347-80","cep":"19010-000"}"""))
@@ -79,13 +79,13 @@ class UsuarioControllerTest extends ApiTestBase {
     // ---------- GET /usuarios (GESTOR) ----------
 
     @Test
-    void gestorListaTodosOsUsuariosOrdenadosPorNomeSemSenhaNemCpf() throws Exception {
+    void gestorListaTodosOsUsuariosOrdenadosPorNomeComCpfESemSenha() throws Exception {
         mockMvc.perform(get("/usuarios?size=100").header("Authorization", bearer(gestor)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElementos").value(5))
                 .andExpect(jsonPath("$.conteudo[0].nome").value("Usuário AGENTE"))
                 .andExpect(jsonPath("$.conteudo[0].senha").doesNotExist())
-                .andExpect(jsonPath("$.conteudo[0].cpf").doesNotExist());
+                .andExpect(jsonPath("$.conteudo[0].cpf").value("39053344705"));
     }
 
     @Test
