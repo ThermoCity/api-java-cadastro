@@ -763,10 +763,5 @@ void contatoRegistradoAtualizaASituacaoNaListaDoDia() throws Exception {
 
 ---
 
-## Próximos passos
 
-- API .NET: publicar o evento `NIVEL_CALOR_ALTERADO` no formato acima (o lado Java já consome).
-- Orientações personalizadas por pessoa (`tmc_orientacao_contato`) com IA generativa.
-
----
 
